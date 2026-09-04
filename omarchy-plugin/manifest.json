@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "id": "com.george.windows-clone",
+  "id": "com.compourri.windows-clone",
   "name": "Windows Clone",
-  "version": "1.0.1",
-  "author": "George",
+  "version": "1.0.2",
+  "author": "Compourri",
   "description": "Clone whole Windows disk (EFI+MSR+NTFS+Recovery) with mismatched sizes - GUI for clone-windows.sh",
   "kinds": ["overlay", "bar-widget"],
   "keepLoaded": true,
