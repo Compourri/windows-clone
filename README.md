@@ -1,5 +1,7 @@
 # Windows Clone
 
+![Windows Clone Preview](preview.png)
+
 Clone a Windows installation to a smaller SSD when the **actual data fits**.
 
 Unlike `dd`, Windows Clone understands the filesystem and can resize the main NTFS partition during the cloning process. This means a 500 GB Windows drive can be cloned to a 256 GB SSD if the Windows data uses less space than the target can hold.
