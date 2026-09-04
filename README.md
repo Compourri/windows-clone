@@ -137,7 +137,6 @@ If you are replacing the original Windows drive and the original will be removed
 |---|---|
 | `--dry-run` | Show the cloning plan without making changes. |
 | `--randomize-guids` | Generate new disk and partition GUIDs for the clone. |
-| `--force` | Deprecated. Has no effect. The Omarchy disk is always protected. |
 | `-h`, `--help` | Show the command-line help. |
 
 ---
@@ -177,9 +176,7 @@ That disk is removed from the source and target selection lists.
 
 **You cannot accidentally select the Omarchy system disk as the target.**
 
-This protection remains active even when `--force` is used from the CLI.
-
-The detection also works on systems where Omarchy is installed on a device other than `/dev/nvme0n1`.
+The detection works on systems where Omarchy is installed on any drive.
 
 ---
 
