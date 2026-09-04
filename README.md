@@ -218,22 +218,23 @@ The target disk will be wiped when the actual clone begins.
 
 ## Installation
 
-Copy the plugin into your Omarchy plugins directory:
+From the marketplace (recommended):
+
+```bash
+omarchy plugin install com.compourri.windows-clone
+```
+
+Manual install:
 
 ```bash
 mkdir -p ~/.config/omarchy/plugins/com.compourri.windows-clone
-cp omarchy-plugin/* ~/.config/omarchy/plugins/com.compourri.windows-clone/
-```
-
-Enable it:
-
-```bash
+cp manifest.json Clone.qml BarWidget.qml ~/.config/omarchy/plugins/com.compourri.windows-clone/
+cp clone-windows.sh ~/.local/bin/clone-windows.sh
+chmod +x ~/.local/bin/clone-windows.sh
 omarchy plugin enable com.compourri.windows-clone
 ```
 
-The Windows Clone icon should now appear in the Omarchy bar.
-
-You can also launch the overlay manually:
+The Windows Clone icon appears in the Omarchy bar. You click it. Or you launch:
 
 ```bash
 omarchy-shell shell summon com.compourri.windows-clone '{}'
@@ -425,27 +426,17 @@ The target is still intentionally destructive.
 # Project Layout
 
 ```text
-clone-windows.sh
-│
-├── CLI cloning tool
-└── Bash script using set -euo pipefail
-
-omarchy-plugin/
-├── manifest.json
-├── Clone.qml
-└── BarWidget.qml
+manifest.json          # plugin manifest (repository root, required by marketplace)
+Clone.qml              # overlay: pickers, Toggle, log
+BarWidget.qml          # bar icon 󰋊
+clone-windows.sh       # CLI cloner, bash set -euo pipefail
+README.md
+preview.png
 ```
 
-### Plugin files
+Repository root is the plugin. `manifest.json` must stay at the root.
 
-`manifest.json`  
-Defines the Omarchy plugin and its overlay/bar-widget components.
-
-`Clone.qml`  
-Provides the cloning interface, disk selectors, GUID toggle, status and live log.
-
-`BarWidget.qml`  
-Adds the Windows Clone icon to the Omarchy bar.
+`manifest.json` defines the overlay and bar-widget entry points. `Clone.qml` provides the cloning interface. `BarWidget.qml` adds the icon.
 
 ---
 
