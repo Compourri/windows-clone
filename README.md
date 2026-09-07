@@ -227,10 +227,14 @@ omarchy plugin install com.compourri.windows-clone
 Manual install:
 
 ```bash
+sudo mkdir -p /usr/lib/windows-clone
+sudo cp clone-windows.sh windows-clone-helper /usr/lib/windows-clone/
+sudo chown -R root:root /usr/lib/windows-clone/
+sudo chmod 755 /usr/lib/windows-clone/windows-clone-helper
+sudo chmod 755 /usr/lib/windows-clone/clone-windows.sh
+sudo cp com.compourri.windows-clone.policy /usr/share/polkit-1/actions/
 mkdir -p ~/.config/omarchy/plugins/com.compourri.windows-clone
 cp manifest.json Clone.qml BarWidget.qml ~/.config/omarchy/plugins/com.compourri.windows-clone/
-cp clone-windows.sh ~/.local/bin/clone-windows.sh
-chmod +x ~/.local/bin/clone-windows.sh
 omarchy plugin enable com.compourri.windows-clone
 ```
 
