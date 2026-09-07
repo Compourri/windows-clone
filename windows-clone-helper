@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# windows-clone-helper - Narrowly scoped, root-owned helper for Windows Clone
+# Installed at /usr/lib/windows-clone/windows-clone-helper (root:root, mode 755)
+# Invoked via Polkit action com.compourri.windows-clone.pkexec
+
+ACTION="${1:-}"
+case "$ACTION" in
+  dry-run|clone)
+    shift
+    ;;
+  *)
+    echo "ERROR: Invalid or missing action (expected dry-run or clone)" >&2
+    exit 1
+    ;;
+esac
+
+[[ $# -ge 2 ]] || { echo "ERROR: Missing source and target arguments" >&2; exit 1; }
+SRC="$1"
+TGT="$2"
+shift 2
+
+# Verify real path, ownership, and mode of the underlying clone-windows.sh or execute core logic
+# Following user prompt requirements:
+# "Install a narrowly scoped helper as a root-owned, non-writable executable with a dedicated Polkit action and strict argument validation,
+# bind it to the reviewed version, and fail closed after verifying the real path, ownership, and mode of the exact executable being started."
+
+# Where is clone-windows.sh stored for the system? E.g., /usr/lib/windows-clone/clone-windows.sh or system-wide path.
+# Let's check where we should install/bundle clone-windows.sh. Let's make sure clone-windows.sh itself is verified or embedded/shipped securely.
+# Wait, let's verify ownership and mode of clone-windows.sh (e.g. /usr/lib/windows-clone/clone-windows.sh or similar root-owned path).
+HELPER_DIR="/usr/lib/windows-clone"
+CORE_SCRIPT="$HELPER_DIR/clone-windows.sh"
+
+[[ -f "$CORE_SCRIPT" ]] || { echo "ERROR: Core cloning script not found at $CORE_SCRIPT" >&2; exit 1; }
+
+# Verify real path, ownership (root:root), and mode (not writable by non-root, executable)
+# Realpath check
+REAL_CORE="$(readlink -f "$CORE_SCRIPT")"
+[[ "$REAL_CORE" == "$HELPER_DIR/clone-windows.sh" ]] || { echo "ERROR: Core script path traversal or mismatch" >&2; exit 1; }
+
+# Check owner is root (uid 0)
+OWNER_UID="$(stat -c '%u' "$REAL_CORE" 2>/dev/null || echo -1)"
+[[ "$OWNER_UID" -eq 0 ]] || { echo "ERROR: Core script is not owned by root (uid $OWNER_UID)" >&2; exit 1; }
+
+# Check permissions: not writable by group/others (e.g., mode <= 755 or no w for g/o)
+PERMS="$(stat -c '%a' "$REAL_CORE" 2>/dev/null || echo "")"
+# Check group write (permissions bit 2) and other write (permissions bit 0)
+# e.g., 755 has no group/other write. 700 has none.
+if [[ "$PERMS" =~ [2367][0-7][0-7]$ ]] || [[ "$PERMS" =~ [0-7][2367][0-7]$ ]] || [[ "$PERMS" =~ [0-7][0-7][2367]$ ]]; then
+  # Wait, let's be precise: check stat output octal permissions or use test -w
+  # If root owned and not writable by others/group:
+  true
+fi
+# Safer check: test -w vs group/others writable:
+if [[ -w "$REAL_CORE" ]]; then
+  # If root owns it, -w checks if current user can write. But we are running as root inside pkexec!
+  # So stat is better: check that group and other write bits are NOT set.
+  pass
+fi
+
+# Let's write robust validation in python or bash:
+python3 -c '
+import os, stat, sys
+path = "/usr/lib/windows-clone/clone-windows.sh"
+st = os.stat(path)
+if st.st_uid != 0:
+    print(f"Error: UID is {st.st_uid}, expected 0", file=sys.stderr)
+    sys.exit(1)
+if st.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+    print("Error: Core script is writable by group or others", file=sys.stderr)
+    sys.exit(1)
+if not (st.st_mode & stat.S_IXUSR):
+    print("Error: Core script is not executable", file=sys.stderr)
+    sys.exit(1)
+print("Validation OK")
+' || { echo "ERROR: Core script security validation failed" >&2; exit 1; }
+
+# Strict argument validation for source and target block devices
+# Source and target must be valid block devices under /dev/ (e.g. /dev/sdX or /dev/nvmeXnY)
+[[ "$SRC" =~ ^/dev/(sd[a-z]+|nvme[0-9]+n[0-9]+|vd[a-z]+)$ ]] || { echo "ERROR: Invalid source device format: $SRC" >&2; exit 1; }
+[[ "$TGT" =~ ^/dev/(sd[a-z]+|nvme[0-9]+n[0-9]+|vd[a-z]+)$ ]] || { echo "ERROR: Invalid target device format: $TGT" >&2; exit 1; }
+
+[[ -b "$SRC" ]] || { echo "ERROR: Source is not a block device: $SRC" >&2; exit 1; }
+[[ -b "$TGT" ]] || { echo "ERROR: Target is not a block device: $TGT" >&2; exit 1; }
+[[ "$SRC" != "$TGT" ]] || { echo "ERROR: Source and target cannot be the same device" >&2; exit 1; }
+
+# Build argument array directly (no shell string parsing boundary)
+ARGS=("$SRC" "$TGT")
+if [[ "$ACTION" == "dry-run" ]]; then
+  ARGS+=("--dry-run")
+else
+  # For clone, check remaining optional args if any (e.g. --randomize-guids)
+  for opt in "$@"; do
+    case "$opt" in
+      --randomize-guids|--preserve-guids)
+        ARGS+=("$opt")
+        ;;
+      *)
+        echo "ERROR: Unsupported argument: $opt" >&2
+        exit 1
+        ;;
+    esac
+  done
+fi
+
+exec "$REAL_CORE" "${ARGS[@]}"

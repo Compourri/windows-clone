@@ -13,7 +13,7 @@ Item {
   property var manifest: null
   property bool opened: false
 
-  property string scriptPath: Quickshell.env("HOME") + "/.local/bin/clone-windows.sh"
+  property string helperPath: "/usr/lib/windows-clone/windows-clone-helper"
   property string logPath: Quickshell.env("HOME") + "/.local/state/clone-windows.log"
   property string omarchyDisk: "" // detected via findmnt/lsblk, no hardcode
 
@@ -28,8 +28,8 @@ Item {
   property int logSeq: 0
   property bool confirmOpen: false
   property string pendingAction: "" // "dryrun" or "clone"
-  property bool scriptExists: true
-  property string scriptExistsMsg: ""
+  property bool helperExists: true
+  property string helperExistsMsg: ""
 
   function open(payloadJson) {
     try {
@@ -111,28 +111,26 @@ Item {
     // lsblk runs after detection finishes
   }
 
-  // Check script exists at startup
+  // Check helper exists at startup
   Process {
-    id: scriptCheckProc
-    command: ["bash","-lc","test -x \"$1\" && echo ok || echo missing; ls -l \"$1\" 2>&1 | head -1","--", Quickshell.env("HOME") + "/.local/bin/clone-windows.sh"]
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: {
-        var t = String(text||"").trim()
-        if (t.indexOf("ok") === -1) {
-          root.scriptExists = false
-          root.scriptExistsMsg = "Script not found: " + root.scriptPath + " — run: mkdir -p ~/.local/bin && cp clone-windows.sh ~/.local/bin/"
-          root.statusText = root.scriptExistsMsg
-          root.statusColor = root.urgent
-        } else {
-          root.scriptExists = true
-          root.scriptExistsMsg = ""
-        }
+    id: helperCheckProc
+    command: ["test", "-x", "/usr/lib/windows-clone/windows-clone-helper"]
+    stdout: StdioCollector { waitForEnd: true }
+    stderr: StdioCollector { waitForEnd: true }
+    onExited: function(code) {
+      if (code !== 0) {
+        root.helperExists = false
+        root.helperExistsMsg = "Helper not found or not executable: /usr/lib/windows-clone/windows-clone-helper"
+        root.statusText = root.helperExistsMsg
+        root.statusColor = root.urgent
+      } else {
+        root.helperExists = true
+        root.helperExistsMsg = ""
       }
     }
   }
 
-  Component.onCompleted: { refreshDisks(); scriptCheckProc.running = true }
+  Component.onCompleted: { refreshDisks(); helperCheckProc.running = true }
 
   function _updateLogLive(outId, errId) {
     var out = String(outId.text||"") + String(errId.text||"")
@@ -189,19 +187,19 @@ Item {
   }
 
   function runDryRun() {
-    if (!root.scriptExists) { root.statusText=root.scriptExistsMsg; root.statusColor=root.urgent; return }
+    if (!root.helperExists) { root.statusText=root.helperExistsMsg; root.statusColor=root.urgent; return }
     if (!root.sourcePath || !root.targetPath) { root.statusText="Pick source and target"; root.statusColor=root.warning; return }
     if (root.sourcePath === root.targetPath) { root.statusText="Source and target must differ"; root.statusColor=root.urgent; return }
     if (!root.omarchyDisk) { root.statusText="Omarchy disk not detected — cannot verify safety, refresh"; root.statusColor=root.warning; return }
     root.busy = true
     root.statusText = "Dry-run..."
     root.statusColor = Color.menu.text
-    root.logText = "Running: sudo "+Util.shellQuote(root.scriptPath)+" "+Util.shellQuote(root.sourcePath)+" "+Util.shellQuote(root.targetPath)+" --dry-run\n"
-    dryRunProc.command = ["pkexec", root.scriptPath, root.sourcePath, root.targetPath, "--dry-run"]
+    root.logText = "Running: pkexec com.compourri.windows-clone.pkexec " + root.helperPath + " dry-run " + root.sourcePath + " " + root.targetPath + "\n"
+    dryRunProc.command = ["pkexec", "--action-id", "com.compourri.windows-clone.pkexec", root.helperPath, "dry-run", root.sourcePath, root.targetPath]
     dryRunProc.running = true
   }
   function requestClone() {
-    if (!root.scriptExists) { root.statusText=root.scriptExistsMsg; root.statusColor=root.urgent; return }
+    if (!root.helperExists) { root.statusText=root.helperExistsMsg; root.statusColor=root.urgent; return }
     if (!root.sourcePath || !root.targetPath) { root.statusText="Pick source and target"; root.statusColor=root.warning; return }
     if (root.sourcePath === root.targetPath) { root.statusText="Source and target must differ"; root.statusColor=root.urgent; return }
     if (!root.omarchyDisk) { root.statusText="Omarchy disk not detected — refusing for safety, refresh"; root.statusColor=root.urgent; return }
@@ -214,10 +212,11 @@ Item {
     root.busy = true
     root.statusText = "Cloning — wiping target..."
     root.statusColor = root.warning
-    root.logText = "Running: sudo "+Util.shellQuote(root.scriptPath)+" "+Util.shellQuote(root.sourcePath)+" "+Util.shellQuote(root.targetPath)+(root.preserveGuids?"":" --randomize-guids")+"\n"
     var extra = root.preserveGuids ? [] : ["--randomize-guids"]
-    var cmd = ["bash","-lc","printf 'YES\\n' | pkexec "+Util.shellQuote(root.scriptPath)+" "+Util.shellQuote(root.sourcePath)+" "+Util.shellQuote(root.targetPath)+(extra.length?" "+extra.join(" "):"")]
-    cloneProc.command = cmd
+    var cmdArgs = ["pkexec", "--action-id", "com.compourri.windows-clone.pkexec", root.helperPath, "clone", root.sourcePath, root.targetPath]
+    for (var i=0; i<extra.length; i++) cmdArgs.push(extra[i])
+    root.logText = "Running: pkexec com.compourri.windows-clone.pkexec " + root.helperPath + " clone " + root.sourcePath + " " + root.targetPath + (extra.length?" "+extra.join(" "):"") + "\n"
+    cloneProc.command = cmdArgs
     cloneProc.running = true
   }
 
@@ -293,7 +292,7 @@ Item {
         // Safety/script banners
         Rectangle {
           Layout.fillWidth: true
-          visible: !root.scriptExists || !root.omarchyDisk
+          visible: !root.helperExists || !root.omarchyDisk
           color: root.urgent
           radius: Style.cornerRadius / 2
           height: visible ? warnCol.implicitHeight + Style.space(12) : 0
@@ -302,8 +301,8 @@ Item {
             anchors.fill: parent
             anchors.margins: Style.space(8)
             spacing: 2
-            Text { visible: !root.scriptExists; text: root.scriptExistsMsg; color: "white"; font.family: root.fontFamily; font.pixelSize: Style.font.caption; wrapMode: Text.Wrap; Layout.fillWidth: true }
-            Text { visible: !root.omarchyDisk && root.scriptExists; text: "Omarchy disk not detected — Clone disabled until detected. Hit Refresh."; color: "white"; font.family: root.fontFamily; font.pixelSize: Style.font.caption; wrapMode: Text.Wrap; Layout.fillWidth: true }
+            Text { visible: !root.helperExists; text: root.helperExistsMsg; color: "white"; font.family: root.fontFamily; font.pixelSize: Style.font.caption; wrapMode: Text.Wrap; Layout.fillWidth: true }
+            Text { visible: !root.omarchyDisk && root.helperExists; text: "Omarchy disk not detected — Clone disabled until detected. Hit Refresh."; color: "white"; font.family: root.fontFamily; font.pixelSize: Style.font.caption; wrapMode: Text.Wrap; Layout.fillWidth: true }
           }
         }
 
