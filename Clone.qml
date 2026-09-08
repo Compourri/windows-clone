@@ -14,6 +14,7 @@ Item {
   property bool opened: false
 
   property string helperPath: "/usr/lib/windows-clone/windows-clone-helper"
+  // Polkit action: com.compourri.windows-clone.pkexec (via org.freedesktop.policykit.exec.path annotation)
   property string logPath: Quickshell.env("HOME") + "/.local/state/clone-windows.log"
   property string omarchyDisk: "" // detected via findmnt/lsblk, no hardcode
 
@@ -194,8 +195,8 @@ Item {
     root.busy = true
     root.statusText = "Dry-run..."
     root.statusColor = Color.menu.text
-    root.logText = "Running: pkexec com.compourri.windows-clone.pkexec " + root.helperPath + " dry-run " + root.sourcePath + " " + root.targetPath + "\n"
-    dryRunProc.command = ["pkexec", "--action-id", "com.compourri.windows-clone.pkexec", root.helperPath, "dry-run", root.sourcePath, root.targetPath]
+    root.logText = "Running: pkexec " + root.helperPath + " dry-run " + root.sourcePath + " " + root.targetPath + "\n"
+    dryRunProc.command = ["pkexec", root.helperPath, "dry-run", root.sourcePath, root.targetPath]
     dryRunProc.running = true
   }
   function requestClone() {
@@ -213,9 +214,9 @@ Item {
     root.statusText = "Cloning — wiping target..."
     root.statusColor = root.warning
     var extra = root.preserveGuids ? [] : ["--randomize-guids"]
-    var cmdArgs = ["pkexec", "--action-id", "com.compourri.windows-clone.pkexec", root.helperPath, "clone", root.sourcePath, root.targetPath]
+    var cmdArgs = ["pkexec", root.helperPath, "clone", root.sourcePath, root.targetPath]
     for (var i=0; i<extra.length; i++) cmdArgs.push(extra[i])
-    root.logText = "Running: pkexec com.compourri.windows-clone.pkexec " + root.helperPath + " clone " + root.sourcePath + " " + root.targetPath + (extra.length?" "+extra.join(" "):"") + "\n"
+    root.logText = "Running: pkexec " + root.helperPath + " clone " + root.sourcePath + " " + root.targetPath + (extra.length?" "+extra.join(" "):"") + "\n"
     cloneProc.command = cmdArgs
     cloneProc.running = true
   }
@@ -370,12 +371,12 @@ Item {
             spacing: Style.spacing.sm
             Button {
               text: root.busy ? "Working…" : "Dry-run"
-              enabled: !root.busy && root.scriptExists && !!root.omarchyDisk && root.sourcePath && root.targetPath && root.sourcePath!==root.targetPath
+              enabled: !root.busy && root.helperExists && !!root.omarchyDisk && root.sourcePath && root.targetPath && root.sourcePath!==root.targetPath
               onClicked: root.runDryRun()
             }
             Button {
               text: root.busy ? "Cloning…" : "Clone — WIPE TARGET"
-              enabled: !root.busy && root.scriptExists && !!root.omarchyDisk && root.sourcePath && root.targetPath && root.sourcePath!==root.targetPath
+              enabled: !root.busy && root.helperExists && !!root.omarchyDisk && root.sourcePath && root.targetPath && root.sourcePath!==root.targetPath
               onClicked: root.requestClone()
             }
             Item { Layout.fillWidth: true }
@@ -420,7 +421,7 @@ Item {
 
         Text {
           Layout.fillWidth: true
-          text: "Log: "+root.logPath+"  •  Script: "+root.scriptPath
+          text: "Log: "+root.logPath+"  •  Helper: "+root.helperPath
           color: Util.alpha(root.foreground,0.55)
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
@@ -446,6 +447,7 @@ Item {
       color: root.background
       border.color: root.urgent
       border.width: 2
+      z: 10
       ColumnLayout {
         id: confirmCol
         anchors.fill: parent
@@ -462,7 +464,6 @@ Item {
           Button { text: "YES, WIPE & CLONE"; onClicked: root.runClone() }
         }
       }
-      MouseArea { anchors.fill: parent; onClicked: {} }
     }
   }
 }

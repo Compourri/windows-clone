@@ -43,23 +43,7 @@ REAL_CORE="$(readlink -f "$CORE_SCRIPT")"
 OWNER_UID="$(stat -c '%u' "$REAL_CORE" 2>/dev/null || echo -1)"
 [[ "$OWNER_UID" -eq 0 ]] || { echo "ERROR: Core script is not owned by root (uid $OWNER_UID)" >&2; exit 1; }
 
-# Check permissions: not writable by group/others (e.g., mode <= 755 or no w for g/o)
-PERMS="$(stat -c '%a' "$REAL_CORE" 2>/dev/null || echo "")"
-# Check group write (permissions bit 2) and other write (permissions bit 0)
-# e.g., 755 has no group/other write. 700 has none.
-if [[ "$PERMS" =~ [2367][0-7][0-7]$ ]] || [[ "$PERMS" =~ [0-7][2367][0-7]$ ]] || [[ "$PERMS" =~ [0-7][0-7][2367]$ ]]; then
-  # Wait, let's be precise: check stat output octal permissions or use test -w
-  # If root owned and not writable by others/group:
-  true
-fi
-# Safer check: test -w vs group/others writable:
-if [[ -w "$REAL_CORE" ]]; then
-  # If root owns it, -w checks if current user can write. But we are running as root inside pkexec!
-  # So stat is better: check that group and other write bits are NOT set.
-  pass
-fi
-
-# Let's write robust validation in python or bash:
+# Robust ownership/mode validation via python (no group/other writable, owned by root, executable)
 python3 -c '
 import os, stat, sys
 path = "/usr/lib/windows-clone/clone-windows.sh"
