@@ -31,6 +31,15 @@ Item {
   property string pendingAction: "" // "dryrun" or "clone"
   property bool helperExists: true
   property string helperExistsMsg: ""
+  // raw vs filtered logs + progress state
+  property string rawLogText: ""
+  property bool showRawLog: false
+  property int rsyncPercent: 0
+  property string rsyncSpeed: ""
+  property string rsyncTransferred: ""
+  property string rsyncElapsed: ""
+  property string rsyncXfr: ""
+  property string rsyncIrChk: ""
 
   function open(payloadJson) {
     try {
@@ -133,12 +142,70 @@ Item {
 
   Component.onCompleted: { refreshDisks(); helperCheckProc.running = true }
 
+  function _formatBytes(commaStr) {
+    if (!commaStr) return ""
+    var n = parseInt(String(commaStr).replace(/,/g,""))
+    if (isNaN(n)) return commaStr
+    if (n >= 1099511627776) return (n/1099511627776).toFixed(1) + " TiB"
+    if (n >= 1073741824) return (n/1073741824).toFixed(1) + " GiB"
+    if (n >= 1048576) return (n/1048576).toFixed(1) + " MiB"
+    if (n >= 1024) return (n/1024).toFixed(1) + " KiB"
+    return n + " B"
+  }
   function _updateLogLive(outId, errId) {
-    var out = String(outId.text||"") + String(errId.text||"")
-    out = out.replace(/[ 0-9.]+ percent completed\r?/g,"")
-    root.logText = out
-    root.logSeq++
-    Qt.callLater(function(){ if (logView) logView.positionViewAtEnd() })
+    var raw = String(outId.text||"") + String(errId.text||"")
+    root.rawLogText = raw
+    // Normalize \r (rsync --info=progress2) to \n, then filter progress lines out of visible log
+    var normalized = raw.replace(/\r/g, "\n")
+    var lines = normalized.split("\n")
+    var filtered = []
+    // Keep last progress values; reset if not busy
+    var lastPercent = root.rsyncPercent
+    for (var i=0;i<lines.length;i++) {
+      var line = lines[i]
+      if (!line.trim()) continue
+      // rsync --info=progress2: "  78,319,653,265  96%   19.13MB/s    1:05:05 (xfr#151668, ir-chk=1884/198256)"
+      var rsyncM = line.match(/^\s*([\d,]+)\s+(\d+)%\s+([\d\.]+\s*[KMGT]?B\/s)\s+([\d:]+)\s+\(xfr#(\d+),/)
+      if (rsyncM) {
+        root.rsyncTransferred = _formatBytes(rsyncM[1])
+        root.rsyncPercent = parseInt(rsyncM[2],10)
+        root.rsyncSpeed = rsyncM[3].replace(/\s+/g,"")
+        root.rsyncElapsed = rsyncM[4]
+        root.rsyncXfr = rsyncM[5]
+        var chk = line.match(/ir-chk=(\d+)\/(\d+)/)
+        if (chk) root.rsyncIrChk = chk[1] + "/" + chk[2]
+        continue
+      }
+      // ntfsclone " 45.67 percent completed"
+      var pctM = line.match(/(\d+\.\d+)\s*percent completed/)
+      if (pctM) {
+        root.rsyncPercent = Math.round(parseFloat(pctM[1]))
+        root.rsyncSpeed = ""
+        continue
+      }
+      // Skip empty rsync summary lines that are just numbers without INFO/WARN prefix
+      // Keep useful lines: INFO/WARN/ERROR, partition table, mkntfs, etc.
+      filtered.push(line)
+    }
+    // Avoid unbounded growth: keep last 800 meaningful lines
+    if (filtered.length > 800) filtered = filtered.slice(filtered.length - 800)
+    var newText = filtered.join("\n")
+    // Only bump seq if visible text changed (prevents thrashing on every progress tick)
+    if (newText !== root.logText) {
+      root.logText = newText
+      root.logSeq++
+      Qt.callLater(function(){ if (logView) logView.positionViewAtEnd() })
+    } else if (lastPercent !== root.rsyncPercent) {
+      // Still need to refresh progress bar even if log didn't change
+      root.logSeq = root.logSeq // trigger progress binding without full log rebuild? Instead just ensure bar updates
+    }
+    // Keep progress bar in sync even when filtered log unchanged
+    if (raw !== root.rawLogText) {
+      // already updated rawLogText above
+    }
+  }
+  function _visibleLogText() {
+    return root.showRawLog ? root.rawLogText.replace(/\r/g, "\n") : root.logText
   }
 
   // ---- clone processes (stream live so UI not frozen 10-20 min) ----
@@ -195,7 +262,10 @@ Item {
     root.busy = true
     root.statusText = "Dry-run..."
     root.statusColor = Color.menu.text
-    root.logText = "Running: pkexec " + root.helperPath + " dry-run " + root.sourcePath + " " + root.targetPath + "\n"
+    root.rsyncPercent = 0; root.rsyncSpeed=""; root.rsyncTransferred=""; root.rsyncElapsed=""; root.rsyncXfr=""; root.rsyncIrChk=""
+    root.rawLogText = "Running: pkexec " + root.helperPath + " dry-run " + root.sourcePath + " " + root.targetPath + "\n"
+    root.logText = root.rawLogText
+    root.logSeq++
     dryRunProc.command = ["pkexec", root.helperPath, "dry-run", root.sourcePath, root.targetPath]
     dryRunProc.running = true
   }
@@ -213,10 +283,13 @@ Item {
     root.busy = true
     root.statusText = "Cloning — wiping target..."
     root.statusColor = root.warning
-    var extra = root.preserveGuids ? [] : ["--randomize-guids"]
+    root.rsyncPercent = 0; root.rsyncSpeed=""; root.rsyncTransferred=""; root.rsyncElapsed=""; root.rsyncXfr=""; root.rsyncIrChk=""
+    var extra = root.preserveGuids ? ["--yes"] : ["--randomize-guids", "--yes"]
     var cmdArgs = ["pkexec", root.helperPath, "clone", root.sourcePath, root.targetPath]
     for (var i=0; i<extra.length; i++) cmdArgs.push(extra[i])
-    root.logText = "Running: pkexec " + root.helperPath + " clone " + root.sourcePath + " " + root.targetPath + (extra.length?" "+extra.join(" "):"") + "\n"
+    root.rawLogText = "Running: pkexec " + root.helperPath + " clone " + root.sourcePath + " " + root.targetPath + (extra.length?" "+extra.join(" "):"") + "\n"
+    root.logText = root.rawLogText
+    root.logSeq++
     cloneProc.command = cmdArgs
     cloneProc.running = true
   }
@@ -384,6 +457,67 @@ Item {
           }
         }
 
+        // Progress — rsync / ntfsclone
+        BorderSurface {
+          Layout.fillWidth: true
+          visible: root.busy && root.rsyncPercent > 0
+          radius: Style.cornerRadius / 2
+          color: Util.alpha(Color.menu.background,0.96)
+          borderSpec: Border.surfaceSpec("menu","border", Util.alpha(root.border,0.35), 1)
+          padding: Style.space(8)
+          ColumnLayout {
+            id: progressCol
+            anchors.fill: parent
+            spacing: Style.spacing.sm
+            RowLayout {
+              Layout.fillWidth: true
+              spacing: Style.spacing.sm
+              Text {
+                text: root.rsyncPercent + "%"
+                color: root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.title
+                font.bold: true
+              }
+              Item { Layout.fillWidth: true }
+              Text {
+                text: (root.rsyncTransferred ? root.rsyncTransferred + " • " : "") + (root.rsyncSpeed ? root.rsyncSpeed : "") + (root.rsyncElapsed ? " • " + root.rsyncElapsed : "") + (root.rsyncXfr ? " • xfr#" + root.rsyncXfr : "") + (root.rsyncIrChk ? " • chk " + root.rsyncIrChk : "")
+                color: Util.alpha(root.foreground,0.7)
+                font.family: "monospace"
+                font.pixelSize: Style.font.caption
+                elide: Text.ElideMiddle
+                Layout.fillWidth: true
+                horizontalAlignment: Text.AlignRight
+              }
+            }
+            Rectangle {
+              Layout.fillWidth: true
+              height: Style.space(10)
+              radius: 5
+              color: Util.alpha(root.foreground, 0.15)
+              clip: true
+              Rectangle {
+                width: parent.width * Math.min(100, root.rsyncPercent) / 100
+                height: parent.height
+                radius: 5
+                color: root.statusColor === root.warning ? root.warning : root.success
+                Behavior on width { NumberAnimation { duration: 250; easing.type: Easing.OutCubic } }
+              }
+            }
+          }
+        }
+
+        // Log header with raw toggle
+        RowLayout {
+          Layout.fillWidth: true
+          spacing: Style.spacing.sm
+          Text { text: root.showRawLog ? "Raw log — full output" : "Log — filtered"; color: Util.alpha(root.foreground,0.7); font.family: root.fontFamily; font.pixelSize: Style.font.caption; Layout.fillWidth: true }
+          Button {
+            text: root.showRawLog ? "Show filtered" : "Show raw"
+            onClicked: root.showRawLog = !root.showRawLog
+          }
+        }
+
         // Log
         BorderSurface {
           Layout.fillWidth: true
@@ -408,13 +542,38 @@ Item {
               wrapMode: Text.Wrap
             }
           }
-          // repopulate on log change
+          // repopulate on log change — respects raw/filtered toggle
           Connections {
             target: root
             function onLogSeqChanged() {
               logModel.clear()
-              var lines = String(root.logText||"").split("\n")
-              for (var i=0;i<lines.length;i++) logModel.append({text: lines[i]})
+              var src = root.showRawLog ? root.rawLogText : root.logText
+              // rawLog may contain \r, normalize for display
+              src = String(src||"").replace(/\r/g, "\n")
+              var lines = src.split("\n")
+              // cap for performance
+              if (lines.length > 1000) lines = lines.slice(lines.length - 1000)
+              for (var i=0;i<lines.length;i++) {
+                // skip empty trailing lines in raw view
+                if (!root.showRawLog && !lines[i].trim()) continue
+                logModel.append({text: lines[i]})
+              }
+            }
+          }
+          Connections {
+            target: root
+            function onShowRawLogChanged() {
+              // rebuild view when toggling
+              logModel.clear()
+              var src = root.showRawLog ? root.rawLogText : root.logText
+              src = String(src||"").replace(/\r/g, "\n")
+              var lines = src.split("\n")
+              if (lines.length > 1000) lines = lines.slice(lines.length - 1000)
+              for (var i=0;i<lines.length;i++) {
+                if (!root.showRawLog && !lines[i].trim()) continue
+                logModel.append({text: lines[i]})
+              }
+              Qt.callLater(function(){ if (logView) logView.positionViewAtEnd() })
             }
           }
         }

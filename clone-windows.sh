@@ -15,6 +15,7 @@ PROG="$(basename "$0")"
 PRESERVE_GUIDS=1
 DRY_RUN=0
 FORCE=0
+ASSUME_YES=0
 # Log to invoking user's HOME even when run via sudo/pkexec (GUI expects ~/.local/state/clone-windows.log)
 _REAL_HOME="$HOME"
 if [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
@@ -57,7 +58,8 @@ Arguments:
 Options:
   --dry-run            Show what would be done, no writes
   --randomize-guids    Don't preserve Disk/Partition GUIDs (for keeping both disks in same PC)
-  --force              Deprecated no-op (kept for compatibility; Omarchy disk always blocked)
+  --force              Deprecated alias for --yes (bypass interactive confirmation; Omarchy disk always blocked)
+  -y, --yes            Bypass interactive YES prompt (for GUI/pkexec - caller must have confirmed)
   -h, --help           Show this
 
 Notes:
@@ -76,7 +78,8 @@ while [[ $# -gt 0 ]]; do
     -h|--help) usage ;;
     --dry-run) DRY_RUN=1; shift ;;
     --randomize-guids) PRESERVE_GUIDS=0; shift ;;
-    --force) FORCE=1; shift ;;
+    --force) FORCE=1; ASSUME_YES=1; shift ;;
+    -y|--yes|--assume-yes) ASSUME_YES=1; shift ;;
     --preserve-guids) PRESERVE_GUIDS=1; shift ;;
     -*) die "Unknown option: $1" ;;
     *) POSITIONAL+=("$1"); shift ;;
@@ -84,7 +87,8 @@ while [[ $# -gt 0 ]]; do
 done
 set -- "${POSITIONAL[@]}"
 [[ ${#POSITIONAL[@]} -eq 2 ]] || { usage; die "Need /dev/source and /dev/target"; }
-if [[ $FORCE -eq 1 ]]; then warn "--force is deprecated no-op: Omarchy disk remains blocked, all other targets already allowed"; fi
+if [[ $FORCE -eq 1 ]]; then warn "--force is now alias for --yes (bypass interactive confirmation; Omarchy disk remains blocked)"; fi
+if [[ $ASSUME_YES -eq 1 && $DRY_RUN -eq 1 ]]; then warn "--yes ignored with --dry-run (no writes)"; fi
 SRC="$1"
 TGT="$2"
 
@@ -284,7 +288,13 @@ echo -e "${RED}WARNING: Target $TGT_REAL ($TGT_HUMAN) WILL BE WIPED!${NC}" | tee
 echo -e "Source $SRC_REAL ($SRC_HUMAN) -> Target $TGT_REAL ($TGT_HUMAN)  GUIDs preserve=$PRESERVE_GUIDS" | tee -a "$LOG_FILE"
 if [[ $DRY_RUN -eq 1 ]]; then
   warn "DRY-RUN - no writes will be done"
+elif [[ $ASSUME_YES -eq 1 ]]; then
+  info "Confirmed via --yes/--force (GUI already confirmed) - proceeding without interactive prompt"
 else
+  # Fail closed when no TTY and no explicit --yes (prevents GUI pkexec hang on anon_pipe_read)
+  if [[ ! -t 0 ]]; then
+    die "No TTY and --yes not given - refusing to wait for interactive input. Re-run with --yes or from a terminal and type YES."
+  fi
   read -rp "Type YES to continue: " confirm
   [[ "$confirm" == "YES" ]] || die "Aborted (must type YES)"
 fi

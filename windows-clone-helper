@@ -74,11 +74,16 @@ ARGS=("$SRC" "$TGT")
 if [[ "$ACTION" == "dry-run" ]]; then
   ARGS+=("--dry-run")
 else
-  # For clone, check remaining optional args if any (e.g. --randomize-guids)
+  # For clone, check remaining optional args if any (e.g. --randomize-guids, --yes)
   for opt in "$@"; do
     case "$opt" in
-      --randomize-guids|--preserve-guids)
-        ARGS+=("$opt")
+      --randomize-guids|--preserve-guids|--yes|-y|--assume-yes|--force)
+        # normalize -y/--assume-yes to --yes for core script
+        if [[ "$opt" == "-y" || "$opt" == "--assume-yes" ]]; then
+          ARGS+=("--yes")
+        else
+          ARGS+=("$opt")
+        fi
         ;;
       *)
         echo "ERROR: Unsupported argument: $opt" >&2
