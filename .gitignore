@@ -1,2 +1,5 @@
 *.log
 /tmp/
+
+# Agent instructions — never ship to marketplace (security blocker)
+AGENTS.md
